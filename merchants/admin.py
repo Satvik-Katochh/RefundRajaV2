@@ -1,3 +1,8 @@
 from django.contrib import admin
+from .models import MerchantRule
 
-# Register your models here.
+
+@admin.register(MerchantRule)
+class MerchantRuleAdmin(admin.ModelAdmin):
+    list_display = ('merchant_name', 'default_return_days')
+    search_fields = ('merchant_name',)
