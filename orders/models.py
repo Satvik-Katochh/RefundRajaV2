@@ -7,6 +7,12 @@ class Order(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL,
                              on_delete=models.CASCADE, related_name='orders')
 
+    raw_email = models.ForeignKey(
+        'ingestion.RawEmail',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='orders'
+    )
     merchant_name = models.CharField(max_length=100)
     # sometimes missing in emails
     order_id = models.CharField(max_length=100, blank=True)
