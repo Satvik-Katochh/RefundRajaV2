@@ -52,6 +52,6 @@ class Order(models.Model):
         return None
 
     def save(self, *args, **kwargs):
-        if not self.return_deadline:
-            self.return_deadline = self.calculate_return_deadline()
+        # Always compute from current inputs; overwrites manual edits
+        self.return_deadline = self.calculate_return_deadline()
         super().save(*args, **kwargs)
