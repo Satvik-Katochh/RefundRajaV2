@@ -20,3 +20,6 @@ media/
 
 # Logs
 *.log
+
+# Development files
+new-chat-prompt.md
