@@ -48,6 +48,7 @@ class EmailParser:
             r'@myntra\.com': 'Myntra',
             r'@nykaa\.com': 'Nykaa',
             r'@zomato\.com': 'Zomato',
+            r'@ajio\.com': 'Ajio',
         }
 
     def parse_email(self, raw_text, from_email):

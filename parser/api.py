@@ -1,0 +1,93 @@
+
+from rest_framework import viewsets, permissions, status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from parser.services import parse_email, create_order_from_email
+from ingestion.models import RawEmail
+
+
+class ParserViewSet(viewsets.ViewSet):
+    """
+    Parser API endpoints
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    @action(detail=False, methods=['post'], url_path='parse-and-create-order')
+    def parse_and_create_order(self, request):
+        """
+        Parse email text and create order
+        """
+        # Get data from request
+        raw_text = request.data.get('raw_text')
+        from_email = request.data.get('from_email')
+        subject = request.data.get('subject', 'Parsed Email')
+
+        # Validate required fields
+        if not raw_text or not from_email:
+            return Response(
+                {'error': 'raw_text and from_email are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Step 1: Parse the email
+            parsed_data = parse_email(raw_text, from_email)
+
+            # Step 2: Check if we have minimum required data
+            if not parsed_data.get('merchant_name') or not parsed_data.get('amount'):
+                return Response(
+                    {
+                        'error': 'Could not extract merchant_name or amount from email',
+                        'parsed_data': parsed_data
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Step 3: Create RawEmail record
+            raw_email = RawEmail.objects.create(
+                user=request.user,
+                message_id=f"api-{request.user.id}-{hash(raw_text) % 10000}",
+                subject=subject,
+                from_email=from_email,
+                to_email=request.user.email,
+                received_at='2025-01-15 10:00:00',
+                raw_text=raw_text
+            )
+
+            # Step 4: Create Order from parsed data
+            order = create_order_from_email(raw_email, parsed_data)
+
+            if order:
+                return Response(
+                    {
+                        'success': True,
+                        'order_id': order.id,
+                        'merchant_name': order.merchant_name,
+                        'order_date': order.order_date,
+                        'delivery_date': order.delivery_date,
+                        'amount': str(order.amount),
+                        'return_deadline': order.return_deadline,
+                        'needs_review': order.needs_review,
+                        'parsed_confidence': order.parsed_confidence,
+                        'parsed_data': parsed_data
+                    },
+                    status=status.HTTP_201_CREATED
+                )
+            else:
+                return Response(
+                    {
+                        'error': 'Failed to create order - missing required data',
+                        'parsed_data': parsed_data
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        except Exception as e:
+            return Response(
+                {
+                    'error': f'Parsing failed: {str(e)}',
+                    'raw_text': raw_text,
+                    'from_email': from_email
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

@@ -19,12 +19,13 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from orders.api import OrderViewSet
 from ingestion.api import RawEmailViewSet
+from parser.api import ParserViewSet
 
 
 router = DefaultRouter()
 router.register(r'orders', OrderViewSet, basename='order')
 router.register(r'raw-emails', RawEmailViewSet, basename='rawemail')
-
+router.register(r'parser', ParserViewSet, basename='parser')
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
