@@ -1,15 +1,17 @@
 # parser/services.py
-from orders.models import Order
+from orders.models import Order, OrderProduct
 import re
 import dateparser
 from decimal import Decimal
 from datetime import datetime
 from merchants.models import MerchantRule
+from parser.html_parsers import MyntraHTMLParser
+from parser.services.order_merger import OrderMerger
 
 
 class EmailParser:
     """
-    Parses order emails using regex patterns
+    Enhanced email parser with HTML-first approach and regex fallback
     """
 
     def __init__(self):
@@ -51,10 +53,33 @@ class EmailParser:
             r'@ajio\.com': 'Ajio',
         }
 
-    def parse_email(self, raw_text, from_email):
+        # HTML parsers for each merchant
+        self.html_parsers = {
+            'Myntra': MyntraHTMLParser(),
+            # Add more merchants here later
+        }
+
+        # Order merger for handling multiple emails
+        self.order_merger = OrderMerger()
+
+    def parse_email(self, raw_text, raw_html=None, from_email=None):
         """
-        Main parsing function
-        Returns: dict with parsed data + confidence score
+        Enhanced parsing with HTML-first approach and regex fallback
+        """
+        merchant = self._extract_merchant(from_email)
+
+        # Step 1: Try HTML parsing first
+        if raw_html and merchant in self.html_parsers:
+            html_result = self.html_parsers[merchant].parse(raw_html)
+            if html_result and html_result['confidence'] > 0.7:
+                return html_result
+
+        # Step 2: Fallback to regex parsing
+        return self._parse_text_fallback(raw_text, from_email)
+
+    def _parse_text_fallback(self, raw_text, from_email):
+        """
+        Fallback regex-based parsing (original method)
         """
         parsed_data = {
             'merchant_name': None,
@@ -189,36 +214,19 @@ class EmailParser:
 
 
 # Convenience function
-def parse_email(raw_text, from_email):
+def parse_email(raw_text, from_email=None, raw_html=None):
     """
     Parse email and return structured data
+    Supports both HTML and text parsing
     """
     parser = EmailParser()
-    return parser.parse_email(raw_text, from_email)
+    return parser.parse_email(raw_text, raw_html=raw_html, from_email=from_email)
 
 
 def create_order_from_email(raw_email, parsed_data):
     """
-    Create Order instance from parsed email data
+    Create or update Order and OrderProduct instances from parsed email data
+    Uses the new OrderMerger for handling multiple emails
     """
-    # Only create if we have minimum required data
-    if not parsed_data.get('merchant_name') or not parsed_data.get('amount') or not parsed_data.get('order_date'):
-        return None
-
-    order = Order(
-        user=raw_email.user,
-        raw_email=raw_email,
-        merchant_name=parsed_data['merchant_name'],
-        order_id=parsed_data.get('order_id', ''),
-        order_date=parsed_data['order_date'],  # Required field
-        delivery_date=parsed_data.get('delivery_date'),
-        amount=parsed_data['amount'],
-        currency=parsed_data.get('currency', 'INR'),
-        return_window_days=parsed_data.get('return_window_days', 30),
-        parsed_confidence=parsed_data['parsed_confidence'],
-        needs_review=parsed_data['parsed_confidence'] < 0.7,
-        parsed_json=parsed_data['parsed_json']
-    )
-
-    order.save()  # This will auto-calculate return_deadline
-    return order
+    merger = OrderMerger()
+    return merger.create_or_update_order(raw_email.user, parsed_data, raw_email)

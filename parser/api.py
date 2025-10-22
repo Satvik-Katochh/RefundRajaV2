@@ -19,25 +19,27 @@ class ParserViewSet(viewsets.ViewSet):
         """
         # Get data from request
         raw_text = request.data.get('raw_text')
+        raw_html = request.data.get('raw_html')
         from_email = request.data.get('from_email')
         subject = request.data.get('subject', 'Parsed Email')
 
         # Validate required fields
-        if not raw_text or not from_email:
+        if not raw_text and not raw_html:
             return Response(
-                {'error': 'raw_text and from_email are required'},
+                {'error': 'Either raw_text or raw_html is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
             # Step 1: Parse the email
-            parsed_data = parse_email(raw_text, from_email)
+            parsed_data = parse_email(
+                raw_text, from_email=from_email, raw_html=raw_html)
 
             # Step 2: Check if we have minimum required data
-            if not parsed_data.get('merchant_name') or not parsed_data.get('amount'):
+            if not parsed_data.get('merchant_name') or not parsed_data.get('order_date'):
                 return Response(
                     {
-                        'error': 'Could not extract merchant_name or amount from email',
+                        'error': 'Could not extract merchant_name or order_date from email',
                         'parsed_data': parsed_data
                     },
                     status=status.HTTP_400_BAD_REQUEST
@@ -46,12 +48,13 @@ class ParserViewSet(viewsets.ViewSet):
             # Step 3: Create RawEmail record
             raw_email = RawEmail.objects.create(
                 user=request.user,
-                message_id=f"api-{request.user.id}-{hash(raw_text) % 10000}",
+                message_id=f"api-{request.user.id}-{hash(str(raw_text or raw_html)) % 10000}",
                 subject=subject,
                 from_email=from_email,
                 to_email=request.user.email,
                 received_at='2025-01-15 10:00:00',
-                raw_text=raw_text
+                raw_text=raw_text or '',
+                raw_html=raw_html or ''
             )
 
             # Step 4: Create Order from parsed data
@@ -65,10 +68,11 @@ class ParserViewSet(viewsets.ViewSet):
                         'merchant_name': order.merchant_name,
                         'order_date': order.order_date,
                         'delivery_date': order.delivery_date,
-                        'amount': str(order.amount),
+                        'total_amount': str(order.total_amount),
                         'return_deadline': order.return_deadline,
                         'needs_review': order.needs_review,
                         'parsed_confidence': order.parsed_confidence,
+                        'products_count': order.products.count(),
                         'parsed_data': parsed_data
                     },
                     status=status.HTTP_201_CREATED
