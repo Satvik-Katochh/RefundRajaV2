@@ -31,4 +31,5 @@ router.register(r'parser', ParserViewSet, basename='parser')
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
+    path('api/auth/', include('accounts.urls')),  # Authentication endpoints
 ]

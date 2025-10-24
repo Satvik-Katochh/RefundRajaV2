@@ -1,9 +1,15 @@
 
+from ingestion.models import RawEmail
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from parser.services import parse_email, create_order_from_email
-from ingestion.models import RawEmail
+# Import directly from services.py file to avoid circular import with services/ package
+import importlib.util
+import os
+spec = importlib.util.spec_from_file_location(
+    "parser_services", os.path.join(os.path.dirname(__file__), "services.py"))
+parser_services = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(parser_services)
 
 
 class ParserViewSet(viewsets.ViewSet):
@@ -32,7 +38,7 @@ class ParserViewSet(viewsets.ViewSet):
 
         try:
             # Step 1: Parse the email
-            parsed_data = parse_email(
+            parsed_data = parser_services.parse_email(
                 raw_text, from_email=from_email, raw_html=raw_html)
 
             # Step 2: Check if we have minimum required data
@@ -58,7 +64,8 @@ class ParserViewSet(viewsets.ViewSet):
             )
 
             # Step 4: Create Order from parsed data
-            order = create_order_from_email(raw_email, parsed_data)
+            order = parser_services.create_order_from_email(
+                raw_email, parsed_data)
 
             if order:
                 return Response(

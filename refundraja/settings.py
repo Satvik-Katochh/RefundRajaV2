@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,6 +40,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Third-party
     'rest_framework',
+    'rest_framework_simplejwt',
+    'rest_framework_simplejwt.token_blacklist',
 
     # Local apps
     'accounts',
@@ -48,6 +51,7 @@ INSTALLED_APPS = [
     'notifications',
     'merchants',
 ]
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -133,3 +137,48 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 TIME_ZONE = 'Asia/Kolkata'
 USE_TZ = True  # Keep True; Django stores in UTC, displays in TIME_ZONE
+
+# Django REST Framework Configuration
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+}
+
+# JWT Configuration
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),  # Token expires in 1 hour
+    # Refresh token expires in 7 days
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
+    # Generate new refresh token on use
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,               # Blacklist old refresh tokens
+    'UPDATE_LAST_LOGIN': True,                       # Update last login timestamp
+    'ALGORITHM': 'HS256',                           # JWT algorithm
+    'SIGNING_KEY': SECRET_KEY,                      # Use Django's secret key
+    'VERIFYING_KEY': None,                          # Will be set automatically
+    'AUDIENCE': None,                               # No audience validation
+    'ISSUER': None,                                 # No issuer validation
+    'JWK_URL': None,                                # No JWK URL
+    'LEEWAY': 0,                                    # No leeway for clock skew
+    'AUTH_HEADER_TYPES': ('Bearer',),              # Authorization header type
+    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',       # Authorization header name
+    'USER_ID_FIELD': 'id',                          # User ID field
+    'USER_ID_CLAIM': 'user_id',                     # User ID claim in token
+    'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
+    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
+    'TOKEN_TYPE_CLAIM': 'token_type',
+    'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
+    'JTI_CLAIM': 'jti',
+    'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
+    'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
+    'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
+}
