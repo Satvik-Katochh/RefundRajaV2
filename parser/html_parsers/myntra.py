@@ -88,61 +88,134 @@ class MyntraHTMLParser(BaseHTMLParser):
         """Extract product information (name, size, quantity, seller)"""
         products = []
 
-        # Extract brand name
-        brand_element = soup.find(
-            'p', {'id': re.compile(r'ItemProductBrandName')})
-        brand = brand_element.get_text().strip() if brand_element else ""
+        # Find all product elements with specific IDs
+        product_elements = soup.find_all(
+            'li', {'id': re.compile(r'ItemProductDescription-\d+')})
 
-        # Extract product name
-        product_element = soup.find(
-            'span', {'id': re.compile(r'ItemProductName')})
-        product = product_element.get_text().strip() if product_element else ""
+        if product_elements:
+            # Multiple products with numbered IDs
+            for product_element in product_elements:
+                # Extract product ID from the element ID
+                product_id_match = re.search(
+                    r'ItemProductDescription-(\d+)', product_element.get('id', ''))
+                if not product_id_match:
+                    continue
 
-        # Combine brand + product
-        product_name = ""
-        if brand and product:
-            product_name = f"{brand} {product}".strip()
-        elif product:
-            product_name = product
-        elif brand:
-            product_name = brand
+                product_id = product_id_match.group(1)
 
-        if product_name:
-            # Extract size
-            size_element = soup.find('span', {'id': re.compile(r'ItemSize')})
-            size = size_element.get_text().strip() if size_element else ""
+                # Extract brand name
+                brand_element = soup.find(
+                    'p', {'id': f'ItemProductBrandName-{product_id}'})
+                brand = brand_element.get_text().strip() if brand_element else ""
 
-            # Extract quantity
-            qty_element = soup.find(
-                'span', {'id': re.compile(r'ItemQuantity')})
-            quantity = 1
-            if qty_element:
-                try:
-                    quantity = int(qty_element.get_text().strip())
-                except:
+                # Extract product name
+                product_element_name = soup.find(
+                    'span', {'id': f'ItemProductName-{product_id}'})
+                product_name = product_element_name.get_text(
+                ).strip() if product_element_name else ""
+
+                # Combine brand + product
+                full_product_name = ""
+                if brand and product_name:
+                    full_product_name = f"{brand} {product_name}".strip()
+                elif product_name:
+                    full_product_name = product_name
+                elif brand:
+                    full_product_name = brand
+
+                if full_product_name:
+                    # Extract size
+                    size_element = soup.find(
+                        'span', {'id': f'ItemSize-{product_id}'})
+                    size = size_element.get_text().strip() if size_element else ""
+
+                    # Extract quantity
+                    qty_element = soup.find(
+                        'span', {'id': f'ItemQuantity-{product_id}'})
                     quantity = 1
+                    if qty_element:
+                        try:
+                            quantity = int(qty_element.get_text().strip())
+                        except:
+                            quantity = 1
 
-            # Extract seller
-            seller_element = soup.find(
-                'div', {'id': re.compile(r'ItemSellerName')})
-            seller = ""
-            if seller_element:
-                seller_text = seller_element.get_text().strip()
-                # Extract seller name after "Sold by: "
-                match = re.search(r'Sold by:\s*(.+)', seller_text)
-                if match:
-                    seller = match.group(1).strip()
+                    # Extract seller
+                    seller_element = soup.find(
+                        'div', {'id': f'ItemSellerName-{product_id}'})
+                    seller = ""
+                    if seller_element:
+                        seller_text = seller_element.get_text().strip()
+                        # Extract seller name after "Sold by: "
+                        match = re.search(r'Sold by:\s*(.+)', seller_text)
+                        if match:
+                            seller = match.group(1).strip()
 
-            # Extract price (if available in delivery email)
-            price = self.extract_amount(soup) or Decimal('0')
+                    # Extract price (if available in delivery email)
+                    price = self.extract_amount(soup) or Decimal('0')
 
-            products.append({
-                'name': product_name,
-                'size': size,
-                'quantity': quantity,
-                'price': price,
-                'seller': seller
-            })
+                    products.append({
+                        'name': full_product_name,
+                        'size': size,
+                        'quantity': quantity,
+                        'price': price,
+                        'seller': seller
+                    })
+        else:
+            # Single product or fallback - extract from non-numbered IDs
+            brand_element = soup.find(
+                'p', {'id': re.compile(r'ItemProductBrandName')})
+            brand = brand_element.get_text().strip() if brand_element else ""
+
+            product_element = soup.find(
+                'span', {'id': re.compile(r'ItemProductName')})
+            product = product_element.get_text().strip() if product_element else ""
+
+            # Combine brand + product
+            product_name = ""
+            if brand and product:
+                product_name = f"{brand} {product}".strip()
+            elif product:
+                product_name = product
+            elif brand:
+                product_name = brand
+
+            if product_name:
+                # Extract size
+                size_element = soup.find(
+                    'span', {'id': re.compile(r'ItemSize')})
+                size = size_element.get_text().strip() if size_element else ""
+
+                # Extract quantity
+                qty_element = soup.find(
+                    'span', {'id': re.compile(r'ItemQuantity')})
+                quantity = 1
+                if qty_element:
+                    try:
+                        quantity = int(qty_element.get_text().strip())
+                    except:
+                        quantity = 1
+
+                # Extract seller
+                seller_element = soup.find(
+                    'div', {'id': re.compile(r'ItemSellerName')})
+                seller = ""
+                if seller_element:
+                    seller_text = seller_element.get_text().strip()
+                    # Extract seller name after "Sold by: "
+                    match = re.search(r'Sold by:\s*(.+)', seller_text)
+                    if match:
+                        seller = match.group(1).strip()
+
+                # Extract price (if available in delivery email)
+                price = self.extract_amount(soup) or Decimal('0')
+
+                products.append({
+                    'name': product_name,
+                    'size': size,
+                    'quantity': quantity,
+                    'price': price,
+                    'seller': seller
+                })
 
         return products
 

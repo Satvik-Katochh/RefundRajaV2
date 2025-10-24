@@ -25,9 +25,7 @@ class OrderMerger:
             # Try multiple matching strategies
             models.Q(order_id=order_id) |  # Direct order ID match
             # Tracking number match
-            models.Q(parsed_json__tracking__tracking_number=order_id) |
-            # Partial match for tracking IDs
-            models.Q(order_id__icontains=order_id[:8])
+            models.Q(parsed_json__tracking__tracking_number=order_id)
         ).first()
 
         if existing_order:
@@ -42,8 +40,9 @@ class OrderMerger:
             return None
 
         # For shipping emails, we might not have order_date, use shipping_date as fallback
+        # For delivery emails, we might not have order_date, use delivery_date as fallback
         order_date = parsed_data.get(
-            'order_date') or parsed_data.get('shipping_date')
+            'order_date') or parsed_data.get('shipping_date') or parsed_data.get('delivery_date')
         if not order_date:
             return None
 
@@ -62,10 +61,12 @@ class OrderMerger:
                 'parsed_confidence', parsed_data.get('confidence', 0.0)),
             needs_review=parsed_data.get(
                 'parsed_confidence', parsed_data.get('confidence', 0.0)) < 0.7,
-            parsed_json=parsed_data.get('parsed_json', {})
+            parsed_json=parsed_data.get('parsed_json', {}),
+            total_amount=parsed_data.get(
+                'amount', Decimal('0.00'))  # Set initial amount
         )
-        # Store tracking information if this is a shipping email
-        if parsed_data.get('email_type') == 'shipping':
+        # Store tracking information for shipping and delivery emails
+        if parsed_data.get('email_type') in ['shipping', 'delivery']:
             tracking_info = {}
             if parsed_data.get('tracking_number'):
                 tracking_info['tracking_number'] = parsed_data['tracking_number']
@@ -129,6 +130,19 @@ class OrderMerger:
                 order.delivery_date = parsed_data['delivery_date']
             if parsed_data.get('return_deadline'):
                 order.return_deadline = parsed_data['return_deadline']
+
+            # For H&M single email strategy, also handle tracking and amount
+            if parsed_data.get('amount'):
+                order.total_amount = parsed_data['amount']
+
+            # Store tracking information for delivery emails (H&M strategy)
+            if parsed_data.get('tracking_number') or parsed_data.get('tracking_url'):
+                tracking_info = order.parsed_json.get('tracking', {})
+                if parsed_data.get('tracking_number'):
+                    tracking_info['tracking_number'] = parsed_data['tracking_number']
+                if parsed_data.get('tracking_url'):
+                    tracking_info['tracking_url'] = parsed_data['tracking_url']
+                order.parsed_json['tracking'] = tracking_info
 
             # Update product return deadlines
             self.update_product_return_deadlines(order)

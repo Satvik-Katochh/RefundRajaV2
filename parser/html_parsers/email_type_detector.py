@@ -26,7 +26,7 @@ class EmailTypeDetector:
         """Detect email type from HTML content"""
         text = soup.get_text().lower()
 
-        # Check for specific HTML IDs that indicate email type
+        # Check for specific HTML IDs that indicate email type (Myntra-specific)
         if soup.find('span', {'id': 'AvailableTillDateId'}):
             return 'delivery'
         if soup.find('span', {'id': 'OrderDeliveredDateId'}):
@@ -43,6 +43,14 @@ class EmailTypeDetector:
             return 'confirmation'
         if soup.find('span', {'id': 'CustomerPromiseTimeId'}):
             return 'confirmation'
+
+        # H&M specific patterns
+        if 'delivered' in text and 'return by' in text:
+            return 'delivery'
+        if 'order has been delivered' in text:
+            return 'delivery'
+        if 'package delivered' in text:
+            return 'delivery'
 
         # Fallback to text pattern matching
         for email_type, patterns in self.EMAIL_TYPE_PATTERNS.items():

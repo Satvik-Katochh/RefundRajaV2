@@ -5,7 +5,7 @@ import dateparser
 from decimal import Decimal
 from datetime import datetime
 from merchants.models import MerchantRule
-from parser.html_parsers import MyntraHTMLParser
+from parser.html_parsers import MyntraHTMLParser, HMHTMLParser
 from parser.services.order_merger import OrderMerger
 
 
@@ -51,11 +51,14 @@ class EmailParser:
             r'@nykaa\.com': 'Nykaa',
             r'@zomato\.com': 'Zomato',
             r'@ajio\.com': 'Ajio',
+            r'@hm\.com': 'H&M',
+            r'@delivery\.hm\.com': 'H&M',
         }
 
         # HTML parsers for each merchant
         self.html_parsers = {
             'Myntra': MyntraHTMLParser(),
+            'H&M': HMHTMLParser(),
             # Add more merchants here later
         }
 
