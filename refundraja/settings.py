@@ -50,6 +50,13 @@ INSTALLED_APPS = [
     'parser',
     'notifications',
     'merchants',
+
+    'django.contrib.sites',  # Required for allauth
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google'
+
 ]
 
 
