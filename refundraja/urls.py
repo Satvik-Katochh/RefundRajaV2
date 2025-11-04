@@ -32,4 +32,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include(router.urls)),
     path('api/auth/', include('accounts.urls')),  # Authentication endpoints
+    path('accounts/', include('allauth.urls')),  # Google Oauth URLs
+
 ]

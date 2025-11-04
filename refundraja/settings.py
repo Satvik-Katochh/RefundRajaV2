@@ -12,16 +12,23 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+import os
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from .env file
+load_dotenv(BASE_DIR / '.env')
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-ebt%bv85z(=q=0^git!x9t2=irrdlq74_-^(9m6$9daxka3f%^'
+# Load from environment variable, fallback to default for development
+SECRET_KEY = os.environ.get(
+    'SECRET_KEY', 'django-insecure-ebt%bv85z(=q=0^git!x9t2=irrdlq74_-^(9m6$9daxka3f%^')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -60,14 +67,50 @@ INSTALLED_APPS = [
 ]
 
 
+AUTHENTICATION_BACKENDS = [
+    # Keep this (for username/password login)
+    'django.contrib.auth.backends.ModelBackend',
+    # Add this (for Google login)
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+SITE_ID = 1
+
+# Redirect after login (fix the 404)
+LOGIN_REDIRECT_URL = '/admin/'  # Redirect to Django admin after login
+
+# django-allauth Settings
+# Explicitly enable token storage
+SOCIALACCOUNT_STORE_TOKENS = True  # Store OAuth tokens in SocialToken model
+
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': [
+            'profile',  # User's name, photo
+            'email',     # User's email address
+            # Read Gmail (can't send/delete)
+            'https://www.googleapis.com/auth/gmail.readonly',
+        ],
+        'AUTH_PARAMS': {
+            # CRITICAL: Gets refresh token (permanent)
+            'access_type': 'offline',
+            'prompt': 'consent',  # Force consent screen to get refresh_token
+        },
+        # Note: Client ID and Secret are stored in database SocialApp object
+        # Configure via Django admin: /admin/socialaccount/socialapp/
+    }
+}
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'allauth.account.middleware.AccountMiddleware',  # ← ADD THIS LINE
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+
 ]
 
 ROOT_URLCONF = 'refundraja.urls'
