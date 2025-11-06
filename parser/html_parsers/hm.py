@@ -97,41 +97,459 @@ class HMHTMLParser(BaseHTMLParser):
         return None
 
     def extract_products(self, soup):
-        """Extract product information from H&M email"""
+        """
+        Extract product information from H&M email using hybrid approach
+
+        Strategy (in order of reliability):
+        1. Product links (href contains productpage pattern) - MOST RELIABLE
+        2. Product table rows (pl-articles-table-row class)
+        3. Table structure with product info
+        4. Div structure with product info
+        5. Smart text analysis (fallback)
+        """
+        print("\n[PARSER] === Extracting Products from H&M Email ===")
         products = []
 
-        # Look for product information in H&M emails
-        # This is a simplified version - you'll need to adapt based on actual H&M email structure
+        # Comprehensive skip keywords (based on actual HTML analysis)
+        skip_keywords = [
+            'complete the look', 'shop by', 'women', 'men', 'kids',
+            'download', 'android', 'ios', 'stores', 'services',
+            'find a store', 'contact', 'footer', 'header',
+            'mode of payment', 'your details', 'we hope',
+            'carrier has informed', 'tracking', 'order number',
+            'delivery', 'return by', 'total', 'amount', 'delivered by',
+            'hm.com', 'www.', 'http', 'https', 'unsubscribe',
+            'privacy', 'terms', 'conditions', 'copyright',
+            'standard delivery', 'delivery method', 'tracking number',
+            'would you like to return', 'register return', 'have your say'
+        ]
 
-        # Try to find product names
-        product_elements = soup.find_all(
-            ['p', 'div', 'span'], string=re.compile(r'[A-Za-z].*', re.I))
+        # Helper function to check for duplicates
+        def is_duplicate(name, price):
+            """Check if product already exists (same name and similar price)"""
+            for p in products:
+                if p['name'] == name and abs(float(p['price']) - float(price)) < 1:
+                    return True
+            return False
 
-        for element in product_elements:
-            text = element.get_text().strip()
-            # Skip if it's too short or looks like metadata
-            if len(text) < 5 or any(skip in text.lower() for skip in ['order', 'delivery', 'return', 'total', 'amount']):
+        # Method 1: PRODUCT LINKS (MOST RELIABLE - based on actual HTML)
+        print(f"[PARSER] Method 1: Searching product links...")
+        # More flexible patterns - href might be URL-encoded or in redirect URLs
+        product_link_patterns = [
+            r'productpage\.\d+',           # productpage.0972640084
+            r'productpage/\d+',            # productpage/0972640084
+            r'hm\.com.*productpage',       # hm.com/...productpage...
+            r'/productpage/',              # any /productpage/ path
+            r'productpage',                # just "productpage" anywhere in URL
+        ]
+
+        all_links = soup.find_all('a', href=True)
+        product_links_found = []
+
+        for link in all_links:
+            href = link.get('href', '')
+            # Decode URL if needed
+            try:
+                from urllib.parse import unquote
+                href_decoded = unquote(href)
+            except:
+                href_decoded = href
+
+            # Check if link matches any product pattern
+            if any(re.search(pattern, href_decoded, re.I) for pattern in product_link_patterns):
+                product_links_found.append(link)
+
+        print(f"[PARSER] Found {len(product_links_found)} product link(s)")
+
+        for link in product_links_found:
+            # Get parent container (td, div, or table)
+            parent = link.find_parent(['td', 'div', 'table', 'tr'])
+            if not parent:
                 continue
 
-            # Extract size if present
-            size_match = re.search(r'Size[:\s]*([A-Z0-9]+)', text, re.I)
-            size = size_match.group(1) if size_match else ""
+            # Get parent text for price extraction
+            parent_text = parent.get_text()
 
-            # Extract quantity if present
-            qty_match = re.search(r'Qty[:\s]*(\d+)', text, re.I)
-            quantity = int(qty_match.group(1)) if qty_match else 1
+            # Extract product name - look in link's child elements first (most reliable)
+            product_name = None
 
-            products.append({
-                'name': text,
-                'size': size,
-                'quantity': quantity,
-                'price': Decimal('0'),  # Will be updated from amount
-                'seller': 'H&M'
-            })
+            # Method A: Look for <p> tags inside the link (H&M structure)
+            p_tags = link.find_all('p')
+            for p in p_tags:
+                p_text = p.get_text().strip()
+                if p_text and 5 <= len(p_text) <= 80:
+                    p_lower = p_text.lower()
+                    # Skip if it's a skip keyword or looks like price/size
+                    if any(skip in p_lower for skip in skip_keywords):
+                        continue
+                    # Price or size only
+                    if re.search(r'^[₹$]', p_text) or re.search(r'^\d+$', p_text):
+                        continue
+                    if re.search(r'[A-Za-z]', p_text):
+                        # This looks like a product name
+                        product_name = p_text
+                        break
+
+            # Method B: Use link text if no <p> found
+            if not product_name:
+                link_text = link.get_text().strip()
+                if link_text and 3 <= len(link_text) <= 80:
+                    if not any(skip in link_text.lower() for skip in skip_keywords):
+                        if re.search(r'[A-Za-z]', link_text):
+                            product_name = link_text
+
+            # Method C: Look in parent container
+            if not product_name:
+                lines = [l.strip()
+                         for l in parent_text.split('\n') if l.strip()]
+                for line in lines[:5]:  # First 5 lines
+                    line_lower = line.lower()
+                    if any(skip in line_lower for skip in skip_keywords):
+                        continue
+                    if 5 <= len(line) <= 80 and re.search(r'[A-Za-z]', line):
+                        # Check if it's not all caps or has multiple words
+                        if not line.isupper() or len(line.split()) > 1:
+                            product_name = line
+                            break
+
+            if not product_name:
+                continue
+
+            # Extract price from parent container (limit to 2 decimal places)
+            price = Decimal('0')
+            price_match = re.search(
+                r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})', parent_text)
+            if price_match:
+                price_str = price_match.group(1).replace(',', '')
+                try:
+                    price = Decimal(price_str).quantize(Decimal('0.01'))
+                except:
+                    pass
+
+            # Skip if price is invalid (too large or too small)
+            if price > 5000 or price < 50:
+                continue
+
+            # Check for duplicates
+            if is_duplicate(product_name, price):
+                continue
+
+            # Extract size (M, L, S, XL, or numeric)
+            size = ""
+            size_patterns = [
+                r'\b([SMXL]{1,2})\b',  # S, M, L, XL
+                r'Size[:\s]*([A-Z0-9\-\.]+)',
+            ]
+            for pattern in size_patterns:
+                size_match = re.search(pattern, parent_text, re.I)
+                if size_match:
+                    potential_size = size_match.group(1).strip()
+                    if len(potential_size) <= 10:
+                        size = potential_size
+                        break
+
+            # Only add if we have product name AND price
+            if product_name and price > 0:
+                products.append({
+                    'name': product_name,
+                    'size': size,
+                    'quantity': 1,
+                    'price': price,
+                    'seller': 'H&M'
+                })
+                print(
+                    f"[PARSER] ✓ Product (link): {product_name[:40]}... (₹{price}, Size: {size or 'N/A'})")
+
+        # Method 2: Product table rows (pl-articles-table-row class - H&M specific)
+        if len(products) == 0:
+            print(f"[PARSER] Method 2: Searching product table rows...")
+            product_rows = soup.find_all(
+                'tr', class_=re.compile(r'pl-articles-table-row', re.I))
+
+            for row in product_rows:
+                row_text = row.get_text()
+
+                # Extract price (limit to 2 decimal places)
+                price_match = re.search(
+                    r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})', row_text)
+                if not price_match:
+                    continue
+
+                price_str = price_match.group(1).replace(',', '')
+                try:
+                    price_value = Decimal(price_str).quantize(Decimal('0.01'))
+                except:
+                    continue
+
+                if price_value > 5000 or price_value < 50:
+                    continue
+
+                # Extract product name (first non-skip line)
+                lines = [l.strip() for l in row_text.split('\n') if l.strip()]
+                product_name = None
+
+                for line in lines:
+                    line_lower = line.lower()
+                    if any(skip in line_lower for skip in skip_keywords):
+                        continue
+                    if 5 <= len(line) <= 80 and re.search(r'[A-Za-z]', line):
+                        # Check if it looks like a product name
+                        if not line.isdigit() and (not line.isupper() or len(line.split()) > 1):
+                            product_name = line
+                            break
+
+                if product_name:
+                    # Check for duplicates
+                    if is_duplicate(product_name, price_value):
+                        continue
+
+                    # Extract size
+                    size = ""
+                    size_match = re.search(
+                        r'\b([SMXL]{1,2})\b', row_text, re.I)
+                    if size_match:
+                        size = size_match.group(1)
+
+                    products.append({
+                        'name': product_name,
+                        'size': size,
+                        'quantity': 1,
+                        'price': price_value,
+                        'seller': 'H&M'
+                    })
+                    print(
+                        f"[PARSER] ✓ Product (table-row): {product_name[:40]}... (₹{price_value})")
+
+        # Method 3: Table structure analysis (ONLY if no products found yet)
+        if len(products) == 0:
+            print(f"[PARSER] Method 3: Searching table structures...")
+            # Only look at tables that might contain products (not footer/header tables)
+            tables = soup.find_all('table')
+            for table in tables:
+                # Skip very small tables (likely layout/spacer tables)
+                table_text = table.get_text()
+                if len(table_text) < 20:
+                    continue
+
+                rows = table.find_all('tr')
+                for row in rows:
+                    row_text = row.get_text()
+
+                    # Skip rows that are too short or too long (likely not product rows)
+                    if len(row_text) < 10 or len(row_text) > 500:
+                        continue
+
+                    # Check if row has price pattern (limit to 2 decimal places)
+                    price_match = re.search(
+                        r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})', row_text)
+                    if not price_match:
+                        continue
+
+                    price_str = price_match.group(1).replace(',', '')
+                    try:
+                        price_value = Decimal(
+                            price_str).quantize(Decimal('0.01'))
+                    except:
+                        continue
+
+                    if price_value > 5000 or price_value < 50:
+                        continue
+
+                    # Extract product name from row (before price)
+                    price_pos = price_match.start()
+                    before_price = row_text[:price_pos].strip()
+
+                    lines = [l.strip()
+                             for l in before_price.split('\n') if l.strip()]
+                    product_name = None
+
+                    for line in reversed(lines):
+                        line_lower = line.lower()
+                        if any(skip in line_lower for skip in skip_keywords):
+                            continue
+                        if 3 <= len(line) <= 80 and re.search(r'[A-Za-z]', line):
+                            if not line.isupper() or len(line.split()) > 1:
+                                product_name = line
+                                break
+
+                    if product_name:
+                        # Check for duplicates
+                        if is_duplicate(product_name, price_value):
+                            continue
+
+                        size = ""
+                        size_match = re.search(
+                            r'\b([SMXL]{1,2})\b', row_text, re.I)
+                        if size_match:
+                            size = size_match.group(1)
+
+                        products.append({
+                            'name': product_name,
+                            'size': size,
+                            'quantity': 1,
+                            'price': price_value,
+                            'seller': 'H&M'
+                        })
+                        print(
+                            f"[PARSER] ✓ Product (table): {product_name[:40]}... (₹{price_value})")
+
+        # Method 4: Div structure analysis
+        if len(products) == 0:
+            print(f"[PARSER] Method 4: Searching div structures...")
+            divs = soup.find_all('div')
+            for div in divs:
+                div_text = div.get_text()
+                if len(div_text) < 10 or len(div_text) > 500:
+                    continue
+
+                price_match = re.search(
+                    r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})', div_text)
+                if not price_match:
+                    continue
+
+                price_str = price_match.group(1).replace(',', '')
+                try:
+                    price_value = Decimal(price_str).quantize(Decimal('0.01'))
+                except:
+                    continue
+
+                if price_value > 5000 or price_value < 50:
+                    continue
+
+                price_pos = price_match.start()
+                before_price = div_text[:price_pos].strip()
+
+                lines = [l.strip()
+                         for l in before_price.split('\n') if l.strip()]
+                product_name = None
+
+                for line in reversed(lines[-3:]):
+                    line_lower = line.lower()
+                    if any(skip in line_lower for skip in skip_keywords):
+                        continue
+                    if 5 <= len(line) <= 80 and re.search(r'[A-Za-z]', line):
+                        product_name = line
+                        break
+
+                if product_name:
+                    # Check for duplicates
+                    if is_duplicate(product_name, price_value):
+                        continue
+
+                    products.append({
+                        'name': product_name,
+                        'size': '',
+                        'quantity': 1,
+                        'price': price_value,
+                        'seller': 'H&M'
+                    })
+                    print(
+                        f"[PARSER] ✓ Product (div): {product_name[:40]}... (₹{price_value})")
+
+        # Method 5: Smart text analysis (last resort)
+        if len(products) == 0:
+            print(f"[PARSER] Method 5: Smart text pattern analysis...")
+            text_content = soup.get_text()
+            price_matches = list(re.finditer(
+                r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})', text_content))
+
+            for price_match in price_matches:
+                price_str = price_match.group(1).replace(',', '')
+                try:
+                    price_value = Decimal(price_str).quantize(Decimal('0.01'))
+                except:
+                    continue
+
+                if price_value > 5000 or price_value < 50:
+                    continue
+
+                start_pos = max(0, price_match.start() - 300)
+                end_pos = min(len(text_content), price_match.end() + 50)
+                context = text_content[start_pos:end_pos]
+
+                lines = [l.strip() for l in context.split('\n') if l.strip()]
+                product_name = None
+
+                price_line_idx = None
+                for i, line in enumerate(lines):
+                    if price_match.group(0) in line:
+                        price_line_idx = i
+                        break
+
+                if price_line_idx is not None:
+                    for i in range(max(0, price_line_idx - 5), price_line_idx):
+                        line = lines[i]
+                        line_lower = line.lower()
+                        if any(skip in line_lower for skip in skip_keywords):
+                            continue
+                        if 5 <= len(line) <= 80 and re.search(r'[A-Za-z]', line):
+                            words = line.split()
+                            if len(words) >= 1 and not line.isdigit():
+                                product_name = line
+                                break
+
+                if product_name:
+                    # Check for duplicates
+                    if is_duplicate(product_name, price_value):
+                        continue
+
+                    products.append({
+                        'name': product_name,
+                        'size': '',
+                        'quantity': 1,
+                        'price': price_value,
+                        'seller': 'H&M'
+                    })
+                    print(
+                        f"[PARSER] ✓ Product (text): {product_name[:40]}... (₹{price_value})")
+
+        print(
+            f"[PARSER] Total: {len(products)} product(s) extracted (before deduplication)")
+
+        # DEDUPLICATE: Merge products with same name + price (within 1 rupee tolerance)
+        # Group by name and similar price, sum quantities
+        deduplicated = {}
+        for product in products:
+            name = product['name']
+            price = float(product['price'])
+
+            # Find existing product with same name and similar price (within ₹1)
+            found_match = False
+            for key, existing in deduplicated.items():
+                existing_price = float(existing['price'])
+                # Match if same name and price within ₹1
+                if existing['name'] == name and abs(existing_price - price) < 1.0:
+                    # Merge: sum quantities, keep higher price (more accurate)
+                    existing['quantity'] = existing.get(
+                        'quantity', 1) + product.get('quantity', 1)
+                    if price > existing_price:
+                        existing['price'] = Decimal(
+                            str(price)).quantize(Decimal('0.01'))
+                    found_match = True
+                    print(
+                        f"[PARSER] Merged duplicate: {name[:40]}... (qty: {existing['quantity']})")
+                    break
+
+            if not found_match:
+                # Create new entry with unique key (name + rounded price)
+                key = f"{name}_{int(price)}"
+                deduplicated[key] = {
+                    'name': name,
+                    'size': product.get('size', ''),
+                    'quantity': product.get('quantity', 1),
+                    'price': Decimal(str(price)).quantize(Decimal('0.01')),
+                    'seller': product.get('seller', 'H&M')
+                }
+
+        # Convert back to list
+        final_products = list(deduplicated.values())
+        print(
+            f"[PARSER] After deduplication: {len(final_products)} unique product(s)")
 
         # If no products found, create a default one
-        if not products:
-            products.append({
+        if not final_products:
+            print(f"[PARSER] ⚠️  No products found, creating default")
+            final_products.append({
                 'name': 'H&M Product',
                 'size': '',
                 'quantity': 1,
@@ -139,7 +557,8 @@ class HMHTMLParser(BaseHTMLParser):
                 'seller': 'H&M'
             })
 
-        return products
+        print("[PARSER] === Product Extraction Complete ===\n")
+        return final_products
 
     def distribute_amount_to_products(self, products, total_amount):
         """Distribute total amount among products for H&M single email strategy"""
@@ -158,12 +577,11 @@ class HMHTMLParser(BaseHTMLParser):
         """Extract total amount from H&M email"""
         text_content = soup.get_text()
 
-        # H&M amount patterns
+        # H&M amount patterns (more specific to avoid picking up product prices)
         amount_patterns = [
-            r'Total[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]*)',
-            r'Amount[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]*)',
-            r'[₹$]\s*([0-9,]+\.?[0-9]*)\s*Total',
-            r'[₹$]\s*([0-9,]+\.?[0-9]*)',
+            r'Total[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',  # Total: ₹299.00
+            r'Amount[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',  # Amount: ₹299.00
+            r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})\s*Total',      # ₹299.00 Total
         ]
 
         for pattern in amount_patterns:
@@ -171,9 +589,24 @@ class HMHTMLParser(BaseHTMLParser):
             if match:
                 amount_str = match.group(1).replace(',', '')
                 try:
-                    return Decimal(amount_str)
+                    amount = Decimal(amount_str)
+                    # Validate it's a reasonable total (usually > 100 for orders)
+                    if amount > 100:
+                        return amount
                 except:
                     continue
+
+        # Fallback: Find largest price (likely the total)
+        all_prices = re.findall(r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})', text_content)
+        if all_prices:
+            try:
+                prices = [Decimal(p.replace(',', '')) for p in all_prices]
+                # Return the largest price that's > 100 (likely total)
+                max_price = max([p for p in prices if p > 100], default=None)
+                if max_price:
+                    return max_price
+            except:
+                pass
 
         return None
 
@@ -225,12 +658,19 @@ class HMHTMLParser(BaseHTMLParser):
 
     def parse_delivery_email(self, soup):
         """H&M delivery email - has EVERYTHING (prices, tracking, return deadline)"""
+        print("\n[PARSER] === Parsing H&M Delivery Email ===")
+
         amount = self.extract_amount(soup)
+        print(f"[PARSER] Extracted Amount: ₹{amount if amount else 'N/A'}")
+
         products = self.extract_products(soup)
 
         # Distribute amount among products for H&M single email strategy
         products = self.distribute_amount_to_products(
             products, amount or Decimal('0'))
+
+        print(f"[PARSER] Final Products Count: {len(products)}")
+        print("[PARSER] === Delivery Email Parsing Complete ===\n")
 
         return {
             'merchant_name': 'H&M',

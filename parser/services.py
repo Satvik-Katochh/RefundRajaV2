@@ -69,16 +69,30 @@ class EmailParser:
         """
         Enhanced parsing with HTML-first approach and regex fallback
         """
+        print("\n[PARSER] === Starting Email Parse ===")
+        print(f"[PARSER] From: {from_email}")
+        
         merchant = self._extract_merchant(from_email)
+        print(f"[PARSER] Detected Merchant: {merchant}")
+        print(f"[PARSER] Has HTML: {bool(raw_html)} ({len(raw_html) if raw_html else 0} chars)")
+        print(f"[PARSER] Has Text: {bool(raw_text)} ({len(raw_text) if raw_text else 0} chars)")
 
         # Step 1: Try HTML parsing first
         if raw_html and merchant in self.html_parsers:
+            print(f"[PARSER] Using HTML parser: {merchant}")
             html_result = self.html_parsers[merchant].parse(raw_html)
             if html_result and html_result['confidence'] > 0.7:
+                print(f"[PARSER] ✓ HTML parsing successful (confidence: {html_result.get('confidence', 0)})")
+                print("[PARSER] === Email Parse Complete ===\n")
                 return html_result
+            else:
+                print(f"[PARSER] ⚠️  HTML parsing low confidence, falling back to text")
 
         # Step 2: Fallback to regex parsing
-        return self._parse_text_fallback(raw_text, from_email)
+        print(f"[PARSER] Using text fallback parser")
+        result = self._parse_text_fallback(raw_text, from_email)
+        print("[PARSER] === Email Parse Complete ===\n")
+        return result
 
     def _parse_text_fallback(self, raw_text, from_email):
         """

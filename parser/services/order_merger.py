@@ -88,8 +88,13 @@ class OrderMerger:
 
         # Create OrderProduct(s)
         products = parsed_data.get('products', [])
+        
+        print(f"\n[ORDER] === Creating OrderProducts ===")
+        print(f"[ORDER] Received {len(products)} product(s) from parser")
+        
         if not products:
             # Single product fallback - create from old structure
+            print(f"[ORDER] No products in parsed_data, using fallback")
             products = [{
                 'name': parsed_data.get('product_name', 'Unknown Product'),
                 'size': parsed_data.get('product_size', ''),
@@ -98,16 +103,69 @@ class OrderMerger:
                 'seller': parsed_data.get('seller_name', '')
             }]
 
+        # Final deduplication check before creating OrderProducts
+        # Group by name + size + price (within ₹1 tolerance)
+        unique_products = {}
         for product_data in products:
-            OrderProduct.objects.create(
+            name = product_data['name']
+            size = product_data.get('size', '')
+            price = float(product_data.get('price', 0))
+            
+            # Create key: name + size
+            key = f"{name}|{size}"
+            
+            if key in unique_products:
+                # Merge: sum quantities, keep higher price
+                existing = unique_products[key]
+                existing['quantity'] = existing.get('quantity', 1) + product_data.get('quantity', 1)
+                if price > float(existing.get('price', 0)):
+                    existing['price'] = Decimal(str(price)).quantize(Decimal('0.01'))
+                print(f"[ORDER] Merged duplicate product: {name[:40]}... (total qty: {existing['quantity']})")
+            else:
+                unique_products[key] = {
+                    'name': name,
+                    'size': size,
+                    'quantity': product_data.get('quantity', 1),
+                    'price': Decimal(str(price)).quantize(Decimal('0.01')),
+                    'seller': product_data.get('seller', 'H&M')
+                }
+        
+        print(f"[ORDER] After deduplication: {len(unique_products)} unique product(s)")
+
+        # Create OrderProduct for each unique product
+        created_count = 0
+        for idx, (key, product_data) in enumerate(unique_products.items(), 1):
+            print(f"[ORDER] Product {idx}/{len(unique_products)}: {product_data['name'][:40]}... (₹{product_data.get('price', 0)}, Qty: {product_data.get('quantity', 1)})")
+            
+            # Check if this product already exists for this order (safety check)
+            existing_product = OrderProduct.objects.filter(
                 order=order,
                 product_name=product_data['name'],
-                product_size=product_data.get('size', ''),
-                product_quantity=product_data.get('quantity', 1),
-                product_price=product_data['price'],
-                seller_name=product_data.get('seller', ''),
-                return_deadline=order.return_deadline
-            )
+                product_size=product_data.get('size', '')
+            ).first()
+            
+            if existing_product:
+                # Update quantity if product already exists
+                existing_product.product_quantity += product_data.get('quantity', 1)
+                if float(product_data.get('price', 0)) > float(existing_product.product_price):
+                    existing_product.product_price = product_data['price']
+                existing_product.save()
+                print(f"[ORDER] Updated existing product (qty: {existing_product.product_quantity})")
+            else:
+                # Create new OrderProduct
+                OrderProduct.objects.create(
+                    order=order,
+                    product_name=product_data['name'],
+                    product_size=product_data.get('size', ''),
+                    product_quantity=product_data.get('quantity', 1),
+                    product_price=product_data['price'],
+                    seller_name=product_data.get('seller', ''),
+                    return_deadline=order.return_deadline
+                )
+                created_count += 1
+        
+        print(f"[ORDER] ✓ Created {created_count} new OrderProduct(s), updated {len(unique_products) - created_count} existing")
+        print(f"[ORDER] === OrderProduct Creation Complete ===\n")
 
         return order
 
