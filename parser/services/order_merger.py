@@ -173,10 +173,16 @@ class OrderMerger:
         """Update existing order with new email data"""
         if email_type == "confirmation":
             # Update price and order date
+            # Confirmation email has the correct total (includes shipping)
             if parsed_data.get('amount'):
                 order.total_amount = parsed_data['amount']
             if parsed_data.get('order_date'):
                 order.order_date = parsed_data['order_date']
+            
+            # Store shipping amount in parsed_json if available
+            if parsed_data.get('shipping_amount'):
+                if 'shipping_amount' not in order.parsed_json:
+                    order.parsed_json['shipping_amount'] = float(parsed_data['shipping_amount'])
 
             # Update products with prices
             self.update_products_with_prices(
@@ -189,8 +195,10 @@ class OrderMerger:
             if parsed_data.get('return_deadline'):
                 order.return_deadline = parsed_data['return_deadline']
 
-            # For H&M single email strategy, also handle tracking and amount
-            if parsed_data.get('amount'):
+            # Don't overwrite total_amount if confirmation email already set it (with shipping)
+            # Delivery email amount is just sum of products (no shipping)
+            # Only update if total_amount is 0 or not set
+            if parsed_data.get('amount') and (not order.total_amount or order.total_amount == 0):
                 order.total_amount = parsed_data['amount']
 
             # Store tracking information for delivery emails (H&M strategy)

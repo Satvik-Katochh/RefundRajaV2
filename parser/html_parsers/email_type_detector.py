@@ -51,6 +51,13 @@ class EmailTypeDetector:
             return 'delivery'
         if 'package delivered' in text:
             return 'delivery'
+        # H&M confirmation patterns
+        if 'thank you for shopping at h&m' in text:
+            return 'confirmation'
+        if 'order confirmation' in text and 'h&m' in text:
+            return 'confirmation'
+        if 'we have received your order' in text:
+            return 'confirmation'
 
         # Fallback to text pattern matching
         for email_type, patterns in self.EMAIL_TYPE_PATTERNS.items():

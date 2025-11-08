@@ -83,20 +83,25 @@ class GmailService:
 
         return service
 
-    def fetch_emails(self, max_results=3):
+    def fetch_emails(self, max_results=10):
         """
         Fetch emails from Gmail matching H&M delivery criteria
 
         Args:
-            max_results: Maximum number of emails to fetch (default: 3)
+            max_results: Maximum number of emails to fetch (default: 10)
 
         Returns:
             List of email dictionaries with subject, from, body, etc.
         """
         print(f"\n[GMAIL] Fetching emails (max: {max_results})")
 
-        # Build Gmail search query for H&M delivery emails
-        query = "from:(delivery.hm.com OR hm.com) subject:(delivered OR delivery)"
+        # Build Gmail search query for H&M emails (confirmation + delivery)
+        # Confirmation: "Order Confirmation" or "Thank you for shopping" (case-insensitive)
+        # Delivery: "delivered" or "delivery" (case-insensitive)
+        # Gmail search is case-insensitive by default, so we can use simple keywords
+        # Using broader query to catch all variations
+        query = "from:(delivery.hm.com OR hm.com) (subject:delivered OR subject:delivery OR subject:confirmation OR subject:thank OR subject:order)"
+        print(f"[GMAIL] Query: {query}")
 
         try:
             # List messages (get email IDs)
@@ -151,8 +156,11 @@ class GmailService:
 
                 html_len = len(body.get('html', ''))
                 text_len = len(body.get('text', ''))
+                subject = headers.get('subject', '')
                 print(
-                    f"[GMAIL] Email {idx}: {headers.get('subject', '')[:50]}...")
+                    f"[GMAIL] Email {idx}: {subject[:50]}...")
+                print(f"[GMAIL]   - From: {from_email}")
+                print(f"[GMAIL]   - Subject: {subject}")
                 print(f"[GMAIL]   - HTML: {html_len} chars")
                 print(f"[GMAIL]   - Text: {text_len} chars")
 

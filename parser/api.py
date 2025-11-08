@@ -111,7 +111,13 @@ class ParserViewSet(viewsets.ViewSet):
         print(f"\n[API] sync_gmail - User: {request.user.username}")
 
         user = request.user
-        max_results = request.data.get('max_results', 3)
+        # Default to 10 emails for easier debugging (should get 5 orders = 10 emails)
+        # User can override by passing max_results in request
+        max_results = request.data.get('max_results', 10)
+        if max_results < 5:
+            print(f"[API] ⚠️  max_results={max_results} is too low, using 10 to fetch both email types")
+            max_results = 10
+        print(f"[API] Using max_results={max_results}")
 
         try:
             # Step 1: Initialize GmailService
@@ -202,6 +208,8 @@ class ParserViewSet(viewsets.ViewSet):
             print(f"[API]   - Merchant: {parsed_data.get('merchant_name')}")
             print(
                 f"[API]   - Products: {len(parsed_data.get('products', []))}")
+            print(f"[API]   - Email Type: {parsed_data.get('email_type', 'unknown')}")
+            print(f"[API]   - Order ID: {parsed_data.get('order_id', 'N/A')}")
 
             # Step 2.5: Fix delivery_date for delivery emails
             if parsed_data.get('email_type') == 'delivery' and not parsed_data.get('delivery_date'):

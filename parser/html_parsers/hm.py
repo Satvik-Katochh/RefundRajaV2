@@ -121,7 +121,18 @@ class HMHTMLParser(BaseHTMLParser):
             'hm.com', 'www.', 'http', 'https', 'unsubscribe',
             'privacy', 'terms', 'conditions', 'copyright',
             'standard delivery', 'delivery method', 'tracking number',
-            'would you like to return', 'register return', 'have your say'
+            'would you like to return', 'register return', 'have your say',
+            # Confirmation email specific text
+            'your order has been confirmed', 'order confirmed', 'order confirmation',
+            'thank you for shopping', 'thank you for your order',
+            'we have received your order', 'order has been placed',
+            'order placed', 'order received', 'payment successful',
+            'order details', 'order summary', 'estimated delivery',
+            # Financial summary terms (should NOT be extracted as products)
+            'order value', 'shipping & handling', 'shipping and handling',
+            'subtotal', 'grand total', 'items total', 'item total',
+            'shipping charges', 'delivery charges', 'handling',
+            'tax', 'gst', 'vat', 'discount', 'coupon'
         ]
 
         # Helper function to check for duplicates
@@ -131,6 +142,37 @@ class HMHTMLParser(BaseHTMLParser):
                 if p['name'] == name and abs(float(p['price']) - float(price)) < 1:
                     return True
             return False
+
+        # Helper function to validate product name (not a financial term or invalid)
+        def is_valid_product_name(name):
+            """Validate that name is actually a product, not a financial summary term"""
+            if not name or len(name) < 3:
+                return False
+            
+            name_lower = name.lower().strip()
+            
+            # Check against skip keywords
+            if any(skip in name_lower for skip in skip_keywords):
+                return False
+            
+            # Financial summary patterns (exact matches or contains)
+            financial_terms = [
+                'order value', 'shipping', 'handling', 'subtotal', 
+                'grand total', 'items total', 'item total', 'total',
+                'tax', 'gst', 'vat', 'discount', 'coupon', 'charges'
+            ]
+            if any(term in name_lower for term in financial_terms):
+                return False
+            
+            # Should have at least one letter (not just numbers/symbols)
+            if not re.search(r'[A-Za-z]', name):
+                return False
+            
+            # Should not be all numbers or mostly symbols
+            if re.match(r'^[\d\s\-\.,₹$]+$', name):
+                return False
+            
+            return True
 
         # Method 1: PRODUCT LINKS (MOST RELIABLE - based on actual HTML)
         print(f"[PARSER] Method 1: Searching product links...")
@@ -248,8 +290,8 @@ class HMHTMLParser(BaseHTMLParser):
                         size = potential_size
                         break
 
-            # Only add if we have product name AND price
-            if product_name and price > 0:
+            # Only add if we have valid product name AND price
+            if product_name and price > 0 and is_valid_product_name(product_name):
                 products.append({
                     'name': product_name,
                     'size': size,
@@ -259,6 +301,8 @@ class HMHTMLParser(BaseHTMLParser):
                 })
                 print(
                     f"[PARSER] ✓ Product (link): {product_name[:40]}... (₹{price}, Size: {size or 'N/A'})")
+            elif product_name and not is_valid_product_name(product_name):
+                print(f"[PARSER] ⚠️  Skipped invalid product name: {product_name[:40]}...")
 
         # Method 2: Product table rows (pl-articles-table-row class - H&M specific)
         if len(products) == 0:
@@ -298,7 +342,7 @@ class HMHTMLParser(BaseHTMLParser):
                             product_name = line
                             break
 
-                if product_name:
+                if product_name and is_valid_product_name(product_name):
                     # Check for duplicates
                     if is_duplicate(product_name, price_value):
                         continue
@@ -319,6 +363,8 @@ class HMHTMLParser(BaseHTMLParser):
                     })
                     print(
                         f"[PARSER] ✓ Product (table-row): {product_name[:40]}... (₹{price_value})")
+                elif product_name and not is_valid_product_name(product_name):
+                    print(f"[PARSER] ⚠️  Skipped invalid product name: {product_name[:40]}...")
 
         # Method 3: Table structure analysis (ONLY if no products found yet)
         if len(products) == 0:
@@ -372,7 +418,7 @@ class HMHTMLParser(BaseHTMLParser):
                                 product_name = line
                                 break
 
-                    if product_name:
+                    if product_name and is_valid_product_name(product_name):
                         # Check for duplicates
                         if is_duplicate(product_name, price_value):
                             continue
@@ -392,6 +438,8 @@ class HMHTMLParser(BaseHTMLParser):
                         })
                         print(
                             f"[PARSER] ✓ Product (table): {product_name[:40]}... (₹{price_value})")
+                    elif product_name and not is_valid_product_name(product_name):
+                        print(f"[PARSER] ⚠️  Skipped invalid product name: {product_name[:40]}...")
 
         # Method 4: Div structure analysis
         if len(products) == 0:
@@ -431,7 +479,7 @@ class HMHTMLParser(BaseHTMLParser):
                         product_name = line
                         break
 
-                if product_name:
+                if product_name and is_valid_product_name(product_name):
                     # Check for duplicates
                     if is_duplicate(product_name, price_value):
                         continue
@@ -445,6 +493,8 @@ class HMHTMLParser(BaseHTMLParser):
                     })
                     print(
                         f"[PARSER] ✓ Product (div): {product_name[:40]}... (₹{price_value})")
+                elif product_name and not is_valid_product_name(product_name):
+                    print(f"[PARSER] ⚠️  Skipped invalid product name: {product_name[:40]}...")
 
         # Method 5: Smart text analysis (last resort)
         if len(products) == 0:
@@ -488,7 +538,7 @@ class HMHTMLParser(BaseHTMLParser):
                                 product_name = line
                                 break
 
-                if product_name:
+                if product_name and is_valid_product_name(product_name):
                     # Check for duplicates
                     if is_duplicate(product_name, price_value):
                         continue
@@ -502,6 +552,8 @@ class HMHTMLParser(BaseHTMLParser):
                     })
                     print(
                         f"[PARSER] ✓ Product (text): {product_name[:40]}... (₹{price_value})")
+                elif product_name and not is_valid_product_name(product_name):
+                    print(f"[PARSER] ⚠️  Skipped invalid product name: {product_name[:40]}...")
 
         print(
             f"[PARSER] Total: {len(products)} product(s) extracted (before deduplication)")
