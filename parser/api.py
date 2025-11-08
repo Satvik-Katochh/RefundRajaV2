@@ -203,6 +203,12 @@ class ParserViewSet(viewsets.ViewSet):
             print(
                 f"[API]   - Products: {len(parsed_data.get('products', []))}")
 
+            # Step 2.5: Fix delivery_date for delivery emails
+            if parsed_data.get('email_type') == 'delivery' and not parsed_data.get('delivery_date'):
+                if raw_email and raw_email.received_at:
+                    parsed_data['delivery_date'] = raw_email.received_at.date()
+                    print(f"[API] Using email received_at as delivery_date: {parsed_data['delivery_date']}")
+
             # Step 3: Create Order from parsed data
             print(f"[API] Step 3: Creating Order...")
             order = parser_services.create_order_from_email(

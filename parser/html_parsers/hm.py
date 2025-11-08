@@ -574,14 +574,15 @@ class HMHTMLParser(BaseHTMLParser):
         return products
 
     def extract_amount(self, soup):
-        """Extract total amount from H&M email"""
+        """Extract total amount from H&M email (final total including shipping)"""
         text_content = soup.get_text()
 
         # H&M amount patterns (more specific to avoid picking up product prices)
+        # Look for "Total" which is the final amount (Order value + Shipping)
         amount_patterns = [
-            r'Total[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',  # Total: ₹299.00
-            r'Amount[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',  # Amount: ₹299.00
-            r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})\s*Total',      # ₹299.00 Total
+            r'Total[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',  # Total: ₹1,047.00
+            r'Amount[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',  # Amount: ₹1,047.00
+            r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})\s*Total',      # ₹1,047.00 Total
         ]
 
         for pattern in amount_patterns:
@@ -589,7 +590,7 @@ class HMHTMLParser(BaseHTMLParser):
             if match:
                 amount_str = match.group(1).replace(',', '')
                 try:
-                    amount = Decimal(amount_str)
+                    amount = Decimal(amount_str).quantize(Decimal('0.01'))
                     # Validate it's a reasonable total (usually > 100 for orders)
                     if amount > 100:
                         return amount
@@ -600,7 +601,7 @@ class HMHTMLParser(BaseHTMLParser):
         all_prices = re.findall(r'[₹$]\s*([0-9,]+\.?[0-9]{0,2})', text_content)
         if all_prices:
             try:
-                prices = [Decimal(p.replace(',', '')) for p in all_prices]
+                prices = [Decimal(p.replace(',', '')).quantize(Decimal('0.01')) for p in all_prices]
                 # Return the largest price that's > 100 (likely total)
                 max_price = max([p for p in prices if p > 100], default=None)
                 if max_price:
@@ -608,6 +609,54 @@ class HMHTMLParser(BaseHTMLParser):
             except:
                 pass
 
+        return None
+
+    def extract_order_value(self, soup):
+        """Extract Order value (sum of products) from H&M confirmation email"""
+        text_content = soup.get_text()
+        
+        # Look for "Order value" followed by price (this is sum of products, before shipping)
+        order_value_patterns = [
+            r'Order\s+value[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',
+            r'Subtotal[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',
+            r'Items\s+total[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',
+        ]
+        
+        for pattern in order_value_patterns:
+            match = re.search(pattern, text_content, re.IGNORECASE)
+            if match:
+                value_str = match.group(1).replace(',', '')
+                try:
+                    value = Decimal(value_str).quantize(Decimal('0.01'))
+                    if value > 0:
+                        return value
+                except:
+                    continue
+        
+        return None
+
+    def extract_shipping_amount(self, soup):
+        """Extract shipping & handling amount from H&M confirmation email"""
+        text_content = soup.get_text()
+        
+        # Look for "Shipping & handling" or "Shipping" followed by price
+        shipping_patterns = [
+            r'Shipping\s*&\s*handling[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',
+            r'Shipping[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',
+            r'Delivery\s+charges?[:\s]+[₹$]?\s*([0-9,]+\.?[0-9]{0,2})',
+        ]
+        
+        for pattern in shipping_patterns:
+            match = re.search(pattern, text_content, re.IGNORECASE)
+            if match:
+                shipping_str = match.group(1).replace(',', '')
+                try:
+                    shipping = Decimal(shipping_str).quantize(Decimal('0.01'))
+                    if 0 < shipping < 10000:  # Reasonable shipping range
+                        return shipping
+                except:
+                    continue
+        
         return None
 
     def extract_tracking_number(self, soup):
@@ -647,42 +696,86 @@ class HMHTMLParser(BaseHTMLParser):
 
         return None
 
-    # H&M Strategy: Single email (delivery email has everything)
+    # H&M Strategy: Confirmation and delivery are different emails
     def parse_confirmation_email(self, soup):
-        """H&M confirmation email - same as delivery (single email strategy)"""
-        return self.parse_delivery_email(soup)
+        """H&M confirmation email - has individual prices + Order value + Shipping + Total"""
+        print("\n[PARSER] === Parsing H&M Confirmation Email ===")
+        
+        products = self.extract_products(soup)
+        
+        # Extract amounts from confirmation email
+        order_value = self.extract_order_value(soup)  # "Order value" (sum of products)
+        shipping_amount = self.extract_shipping_amount(soup)  # "Shipping & handling"
+        total_amount = self.extract_amount(soup)  # "Total" (Order value + Shipping)
+        
+        print(f"[PARSER] Order value: ₹{order_value if order_value else 'N/A'}")
+        print(f"[PARSER] Shipping: ₹{shipping_amount if shipping_amount else 'N/A'}")
+        print(f"[PARSER] Total: ₹{total_amount if total_amount else 'N/A'}")
+        
+        # If products don't have individual prices, distribute order_value
+        products_with_prices = [p for p in products if p.get('price', 0) > 0]
+        if len(products_with_prices) < len(products) and order_value:
+            # Some products missing prices - distribute order_value
+            print(f"[PARSER] Some products missing prices, distributing order_value")
+            products = self.distribute_amount_to_products(products, order_value)
+        
+        # Store shipping in parsed_json
+        parsed_json = {'source': 'html-hm-confirmation-v1'}
+        if shipping_amount:
+            parsed_json['shipping_amount'] = float(shipping_amount)
+        if order_value:
+            parsed_json['order_value'] = float(order_value)
+        
+        print("[PARSER] === Confirmation Email Parsing Complete ===\n")
+        
+        return {
+            'merchant_name': 'H&M',
+            'order_id': self.extract_order_id(soup),
+            'order_date': self.extract_order_date(soup),
+            'delivery_date': None,
+            'return_deadline': None,
+            'amount': total_amount,  # Total (Order value + Shipping)
+            'shipping_amount': shipping_amount,  # New field
+            'products': products,
+            'tracking_number': None,
+            'tracking_url': None,
+            'email_type': 'confirmation',
+            'confidence': 0.95,
+            'parsed_json': parsed_json
+        }
 
     def parse_shipping_email(self, soup):
         """H&M shipping email - same as delivery (single email strategy)"""
         return self.parse_delivery_email(soup)
 
     def parse_delivery_email(self, soup):
-        """H&M delivery email - has EVERYTHING (prices, tracking, return deadline)"""
+        """H&M delivery email - has individual prices, NO total amount"""
         print("\n[PARSER] === Parsing H&M Delivery Email ===")
 
-        amount = self.extract_amount(soup)
-        print(f"[PARSER] Extracted Amount: ₹{amount if amount else 'N/A'}")
-
         products = self.extract_products(soup)
-
-        # Distribute amount among products for H&M single email strategy
-        products = self.distribute_amount_to_products(
-            products, amount or Decimal('0'))
-
-        print(f"[PARSER] Final Products Count: {len(products)}")
+        
+        # Delivery emails have individual prices - DON'T distribute
+        # Calculate total from sum of individual product prices
+        total_amount = Decimal('0')
+        for product in products:
+            if product.get('price', 0) > 0:
+                total_amount += Decimal(str(product['price']))
+        
+        print(f"[PARSER] Individual prices found: {len(products)} products")
+        print(f"[PARSER] Calculated total from products: ₹{total_amount}")
         print("[PARSER] === Delivery Email Parsing Complete ===\n")
 
         return {
             'merchant_name': 'H&M',
             'order_id': self.extract_order_id(soup),
             'order_date': self.extract_order_date(soup),
-            'delivery_date': self.extract_delivery_date(soup),
+            'delivery_date': None,  # Will be set from raw_email.received_at
             'return_deadline': self.extract_return_deadline(soup),
-            'amount': amount,  # PRICE IS HERE
+            'amount': total_amount,  # Sum of individual prices
             'products': products,
             'tracking_number': self.extract_tracking_number(soup),
             'tracking_url': self.extract_tracking_url(soup),
             'email_type': 'delivery',
-            'confidence': 0.95,  # High confidence - complete data
+            'confidence': 0.95,
             'parsed_json': {'source': 'html-hm-delivery-v1'}
         }
